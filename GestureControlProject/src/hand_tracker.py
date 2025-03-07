@@ -3,6 +3,7 @@ import mediapipe as mp
 import pyautogui
 import numpy as np
 import sys
+from pynput.mouse import Button, Controller
 
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
@@ -11,7 +12,12 @@ screen_width, screen_height = pyautogui.size()
 
 # Store previous fingertip depth (z-coordinate)
 prev_z = None
-click_threshold = 0.02  # Adjust this threshold based on testing
+click_threshold = 0.01  # Lowered threshold for easier clicking
+
+# State variable to track if a click has been triggered
+click_triggered = False
+
+mouse = Controller()
 
 def move_cursor(index_finger_tip):
     x, y = index_finger_tip.x, index_finger_tip.y
@@ -110,10 +116,14 @@ with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) a
                 if handedness == 'Left':
                     # Check if left hand is making a fist
                     if is_fist(hand_landmarks):
-                        # Trigger click if fist is detected
-                        if prev_z is not None and (prev_z - z) > click_threshold:
-                            pyautogui.click()  # Simulate a click
+                        print("Fist detected!")  # Debugging output
+                        print(f"Current Z: {z}, Previous Z: {prev_z}")
+                        if prev_z is not None and (prev_z - z) > click_threshold and not click_triggered:
+                            mouse.click(Button.left)  # Simulate a click using pynput
                             print("Click triggered!")
+                            click_triggered = True  # Set the state to indicate a click has been triggered
+                    else:
+                        click_triggered = False  # Reset if the hand is open
 
                 prev_z = z  # Update previous Z value
                 mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
