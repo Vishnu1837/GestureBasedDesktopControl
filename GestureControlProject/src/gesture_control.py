@@ -8,6 +8,7 @@ import numpy as np
 from threading import Thread
 import queue
 import os
+import win32clipboard
 
 # Initialize MediaPipe
 mp_hands = mp.solutions.hands
@@ -56,6 +57,13 @@ pyautogui.FAILSAFE = False
 smoothing = 0.5
 prev_x, prev_y = 0, 0
 
+# Add variables to track states
+save_dialog_active = False
+last_gesture_time = 0
+GESTURE_COOLDOWN = 1.0  # Reduced cooldown time for smoother response
+last_skip_time = 0
+SKIP_COOLDOWN = 0.8  # Specific cooldown for YouTube skip
+
 def get_active_window_title():
     """Get the title of the currently active window"""
     window = win32gui.GetForegroundWindow()
@@ -88,25 +96,96 @@ def is_thumbs_up(hand_landmarks):
             all(hand_landmarks.landmark[i].y > hand_landmarks.landmark[i-2].y 
                 for i in [8, 12, 16, 20]))
 
+def get_clipboard_text():
+    """Get text from clipboard"""
+    try:
+        win32clipboard.OpenClipboard()
+        try:
+            text = win32clipboard.GetClipboardData(win32clipboard.CF_TEXT)
+            return text.decode('utf-8')
+        except:
+            return ""
+        finally:
+            win32clipboard.CloseClipboard()
+    except:
+        return ""
+
 def handle_thumbs_up_action():
     """Handle thumbs up gesture based on active window"""
+    global save_dialog_active, last_gesture_time, last_skip_time
+    
+    # Check cooldown to prevent accidental double gestures
+    current_time = time.time()
+    if current_time - last_gesture_time < GESTURE_COOLDOWN:
+        return
+    last_gesture_time = current_time
+    
     active_window = get_active_window_title().lower()
     
     if "youtube" in active_window:
-        # Simulate pressing 'l' key which is the shortcut for liking a YouTube video
+        # Check specific cooldown for YouTube skip
+        if current_time - last_skip_time < SKIP_COOLDOWN:
+            return
+        last_skip_time = current_time
+        
+        # Just press 'l' to skip forward 10 seconds
         pyautogui.press('l')
-        print("YouTube video liked!")
-    elif "notepad" in active_window:
-        # Use Ctrl+Shift+S for "Save As" dialog
-        pyautogui.hotkey('ctrl', 'shift', 's')
-        time.sleep(0.5)  # Wait for dialog to appear
+        print("Skipped forward 10 seconds!")
         
-        # Type the Documents path
-        documents_path = os.path.expanduser("~/Documents")
-        pyautogui.write(documents_path)
-        pyautogui.press('enter')
-        
-        print("Save As dialog opened in Documents folder")
+    elif "notepad" in active_window or "save as" in active_window:
+        if not save_dialog_active:
+            # First thumbs up: Open save dialog and prepare filename
+            print("First thumbs up detected - Opening save dialog...")
+            
+            # Select all text and copy
+            pyautogui.hotkey('ctrl', 'a')
+            time.sleep(0.5)  # Increased wait for selection
+            pyautogui.hotkey('ctrl', 'c')
+            time.sleep(0.5)  # Increased wait for clipboard
+            
+            # Get first line of text for filename
+            content = get_clipboard_text()
+            filename = content.split('\n')[0][:30] if content else "untitled"
+            filename = ''.join(c for c in filename if c.isalnum() or c in (' ', '-', '_')) + '.txt'
+            
+            # Open save dialog
+            pyautogui.hotkey('ctrl', 'shift', 's')
+            time.sleep(1.5)  # Increased wait for dialog
+            
+            # Navigate to Documents
+            documents_path = os.path.expanduser("~/Documents")
+            pyautogui.write(documents_path)
+            time.sleep(0.5)
+            pyautogui.press('enter')
+            time.sleep(1.0)  # Increased wait after navigation
+            
+            # Write filename
+            pyautogui.write(filename)
+            save_dialog_active = True
+            print(f"Save As dialog opened - Suggested filename: {filename}")
+            
+        else:
+            # Second thumbs up: Confirm save
+            print("Second thumbs up detected - Saving file...")
+            time.sleep(0.5)  # Increased wait before save
+            
+            # Make sure we're in the save dialog
+            active = get_active_window_title().lower()
+            if "save as" in active:
+                # Press Alt+S as a more reliable way to save
+                pyautogui.hotkey('alt', 's')
+                time.sleep(0.3)
+                
+                # Also try Enter as a backup
+                pyautogui.press('enter')
+                time.sleep(0.3)
+                
+                save_dialog_active = False
+                print("File saved successfully!")
+            else:
+                print("Save dialog not found. Please try again.")
+                save_dialog_active = False
+            
     else:
         # Check if YouTube window exists in background
         def callback(hwnd, windows):
@@ -120,21 +199,21 @@ def handle_thumbs_up_action():
         win32gui.EnumWindows(callback, youtube_windows)
         
         if youtube_windows:
-            # Store current window to return to it later
+            # Check specific cooldown for YouTube skip
+            if current_time - last_skip_time < SKIP_COOLDOWN:
+                return
+            last_skip_time = current_time
+            
             current_window = win32gui.GetForegroundWindow()
-            
-            # Switch to YouTube window
             win32gui.SetForegroundWindow(youtube_windows[0])
-            time.sleep(0.5)  # Wait for window to become active
+            time.sleep(0.2)  # Reduced delay
             
-            # Like the video
+            # Just press 'l' to skip
             pyautogui.press('l')
-            print("YouTube video liked (background window)!")
+            print("Skipped forward 10 seconds (background window)!")
             
-            # Switch back to original window
+            time.sleep(0.2)  # Reduced delay
             win32gui.SetForegroundWindow(current_window)
-            
-    time.sleep(1)  # Prevent multiple actions
 
 try:
     while True:
